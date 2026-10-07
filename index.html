@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ゆるつな｜近所と「好き」でゆるくつながる</title>
+<meta name="description" content="同じ地域や同じ趣味の人と、しがらみなしで気楽に友達になれる場所。">
+<meta name="theme-color" content="#F3F6FF">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧶</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Mochiy+Pop+One&family=Zen+Maru+Gothic:wght@500;700&display=swap" rel="stylesheet">
+<!-- フロントを更新したら ?v= の数字を上げる（スマホのキャッシュ対策） -->
+<link rel="stylesheet" href="style.css?v=1.0.0">
+</head>
+<body>
+<div id="app">
+
+  <!-- 読み込み中 -->
+  <section class="screen" id="screen-loading">
+    <div class="loading"><span class="stk c0">🧶</span><p>よみこみ中…</p></div>
+  </section>
+
+  <!-- ようこそ -->
+  <section class="screen" id="screen-welcome" hidden>
+    <div class="hero">
+      <div class="sticker-cloud" aria-hidden="true">
+        <span class="stk c0" style="--tilt:-6deg">☕ カフェ</span>
+        <span class="stk c2" style="--tilt:4deg">🚶 散歩</span>
+        <span class="stk c1" style="--tilt:-3deg">♨️ サウナ</span>
+        <span class="stk c3" style="--tilt:7deg">🎮 ゲーム</span>
+        <span class="stk c2" style="--tilt:-5deg">📷 写真</span>
+        <span class="stk c0" style="--tilt:3deg">🍜 食べ歩き</span>
+        <span class="stk c3" style="--tilt:-2deg">⛺ キャンプ</span>
+      </div>
+      <h1 class="logo">ゆるつな</h1>
+      <p class="lead">近所の人や、同じ「好き」の人と。<br>しがらみなしで、ゆるくつながろう。</p>
+      <div class="actions">
+        <button class="btn btn-primary btn-lg" data-go="register">はじめる（無料）</button>
+        <button class="btn" data-go="login">ログイン</button>
+      </div>
+    </div>
+    <ol class="steps">
+      <li><b>好きなことを選んで登録</b><span>メールアドレスとニックネームだけでOK</span></li>
+      <li><b>届いた仮パスワードでログイン</b><span>そのあと自分のパスワードに変えます</span></li>
+      <li><b>なかまを見つける</b><span>同じ地域・同じ「好き」の人が並びます</span></li>
+    </ol>
+  </section>
+
+  <!-- 新規登録 -->
+  <section class="screen" id="screen-register" hidden>
+    <header class="bar"><button class="back" data-go="welcome" aria-label="もどる">‹</button><h2>はじめての登録</h2></header>
+    <form id="form-register" class="card" novalidate>
+      <label class="field"><span>メールアドレス</span>
+        <input type="email" name="email" autocomplete="email" inputmode="email" required></label>
+      <label class="field"><span>ニックネーム<small>あとで変えられます</small></span>
+        <input name="nickname" maxlength="20" autocomplete="nickname" required></label>
+      <div class="field"><span>住んでいる・よく行く地域</span>
+        <div class="row">
+          <select name="prefecture" class="pref-select" required aria-label="都道府県"></select>
+          <input name="area" maxlength="30" placeholder="市区町村など（任意）" aria-label="市区町村など">
+        </div>
+      </div>
+      <div class="field"><span>好きなこと<small>タップで選ぶ（10個まで）</small></span>
+        <div class="tag-picker" id="reg-tags"></div>
+      </div>
+      <button class="btn btn-primary btn-block" type="submit">仮パスワードを受け取る</button>
+      <p class="note">入力したメールアドレスに、仮パスワードが届きます。</p>
+    </form>
+  </section>
+
+  <!-- 送信完了 -->
+  <section class="screen" id="screen-sent" hidden>
+    <div class="card center">
+      <div class="big-emoji" aria-hidden="true">💌</div>
+      <h2>メールを送りました</h2>
+      <p><b id="sent-email"></b> に仮パスワードを送りました。24時間以内にログインしてください。</p>
+      <p class="note">届かないときは迷惑メールフォルダも見てみてください。</p>
+      <button class="btn btn-primary btn-block" data-go="login">ログインする</button>
+    </div>
+  </section>
+
+  <!-- ログイン -->
+  <section class="screen" id="screen-login" hidden>
+    <header class="bar"><button class="back" data-go="welcome" aria-label="もどる">‹</button><h2>ログイン</h2></header>
+    <form id="form-login" class="card" novalidate>
+      <label class="field"><span>メールアドレス</span>
+        <input type="email" name="email" autocomplete="email" inputmode="email" required></label>
+      <div class="field"><label for="login-pw"><span>パスワード<small>はじめての方は仮パスワード</small></span></label>
+        <div class="pw"><input id="login-pw" type="password" name="password" autocomplete="current-password" required></div>
+      </div>
+      <button class="btn btn-primary btn-block" type="submit">ログイン</button>
+      <div class="links">
+        <button type="button" class="link" data-go="forgot">パスワードをお忘れの方</button>
+        <button type="button" class="link" data-go="register">はじめての方はこちら</button>
+      </div>
+    </form>
+  </section>
+
+  <!-- 本パスワード設定（初回・再発行後は強制） -->
+  <section class="screen" id="screen-setpw" hidden>
+    <header class="bar"><h2>自分のパスワードを決めましょう</h2></header>
+    <form id="form-setpw" class="card" novalidate>
+      <p class="note-top">仮パスワードのままでは使えません。これから使うパスワードを決めてください。</p>
+      <div class="field"><label for="setpw-new"><span>新しいパスワード</span></label>
+        <div class="pw"><input id="setpw-new" type="password" name="newPassword" autocomplete="new-password" required></div>
+      </div>
+      <div class="field"><label for="setpw-confirm"><span>もう一度入力</span></label>
+        <div class="pw"><input id="setpw-confirm" type="password" name="confirm" autocomplete="new-password" required></div>
+      </div>
+      <ul class="rules" id="setpw-rules">
+        <li data-rule="len">8文字以上</li>
+        <li data-rule="mix">英字と数字を両方使う</li>
+        <li data-rule="same">2回とも同じ</li>
+      </ul>
+      <button class="btn btn-primary btn-block" type="submit">パスワードを設定</button>
+    </form>
+  </section>
+
+  <!-- パスワード再発行 -->
+  <section class="screen" id="screen-forgot" hidden>
+    <header class="bar"><button class="back" data-go="login" aria-label="もどる">‹</button><h2>パスワードの再発行</h2></header>
+    <form id="form-forgot" class="card" novalidate>
+      <p class="note-top">登録したメールアドレスに、新しい仮パスワードを送ります。今のパスワードは、新しく設定するまでそのまま使えます。</p>
+      <label class="field"><span>メールアドレス</span>
+        <input type="email" name="email" autocomplete="email" inputmode="email" required></label>
+      <button class="btn btn-primary btn-block" type="submit">仮パスワードを再発行</button>
+    </form>
+  </section>
+
+  <!-- メイン -->
+  <section class="screen" id="screen-home" hidden>
+    <header class="home-top">
+      <span class="logo-sm">ゆるつな</span>
+      <button class="me-chip" data-tab="me" aria-label="じぶんのプロフィール"><span class="avatar sm" id="me-avatar"></span><span id="me-name"></span></button>
+    </header>
+
+    <!-- さがす -->
+    <div class="tab-panel" id="tab-find">
+      <h2 class="title">なかまをさがす</h2>
+      <div class="filters">
+        <select id="f-pref" class="pref-select" data-allow-all aria-label="地域でしぼる"></select>
+        <div class="chip-row" id="f-hobby" role="group" aria-label="好きなことでしぼる"></div>
+      </div>
+      <div id="member-list" class="member-list" aria-live="polite"></div>
+    </div>
+
+    <!-- じぶん -->
+    <div class="tab-panel" id="tab-me" hidden>
+      <h2 class="title">じぶんのプロフィール</h2>
+      <form id="form-profile" class="card" novalidate>
+        <div class="avatar-edit">
+          <span class="avatar lg" id="prof-avatar"></span>
+          <label class="btn btn-small">写真を変える<input type="file" accept="image/*" id="icon-input" hidden></label>
+        </div>
+        <label class="field"><span>ニックネーム</span><input name="nickname" maxlength="20" required></label>
+        <div class="field"><span>地域</span>
+          <div class="row">
+            <select name="prefecture" class="pref-select" required aria-label="都道府県"></select>
+            <input name="area" maxlength="30" placeholder="市区町村など（任意）" aria-label="市区町村など">
+          </div>
+        </div>
+        <div class="field"><span>好きなこと<small>10個まで</small></span>
+          <div class="tag-picker" id="me-tags"></div>
+          <div class="ai-box">
+            <label class="ai-label" for="ai-tag-text">好きなことを文章で書くと、AIがタグを提案します</label>
+            <textarea id="ai-tag-text" rows="2" maxlength="300" placeholder="例：休日は近所の喫茶店めぐり。最近ととのうのにハマってます"></textarea>
+            <button type="button" class="btn btn-small" id="ai-tag-btn">タグを提案してもらう</button>
+            <div class="tag-suggest" id="ai-tag-result"></div>
+          </div>
+        </div>
+        <div class="field"><label for="prof-bio"><span>自己紹介<small>300文字まで</small></span></label>
+          <textarea id="prof-bio" name="bio" rows="4" maxlength="300" placeholder="どんなふうにつながりたいか、ひとこと書いてみましょう"></textarea>
+          <div class="ai-box">
+            <span class="ai-label">AIに下書きを作ってもらう</span>
+            <div class="tone" role="radiogroup" aria-label="口調">
+              <label><input type="radio" name="tone" value="yuru" checked><span>ゆるめ</span></label>
+              <label><input type="radio" name="tone" value="teinei"><span>ていねい</span></label>
+              <label><input type="radio" name="tone" value="genki"><span>元気</span></label>
+            </div>
+            <input id="ai-bio-kw" maxlength="100" placeholder="入れたいひとこと（任意）例：朝型、土日ひま" aria-label="入れたいひとこと">
+            <button type="button" class="btn btn-small" id="ai-bio-btn">自己紹介文を作ってもらう</button>
+            <div id="ai-bio-result"></div>
+          </div>
+        </div>
+        <button class="btn btn-primary btn-block" type="submit">プロフィールを保存</button>
+      </form>
+
+      <form id="form-changepw" class="card" novalidate>
+        <h3>パスワードの変更</h3>
+        <div class="field"><label for="cp-cur"><span>今のパスワード</span></label>
+          <div class="pw"><input id="cp-cur" type="password" name="currentPassword" autocomplete="current-password" required></div></div>
+        <div class="field"><label for="cp-new"><span>新しいパスワード<small>8文字以上・英字と数字</small></span></label>
+          <div class="pw"><input id="cp-new" type="password" name="newPassword" autocomplete="new-password" required></div></div>
+        <div class="field"><label for="cp-confirm"><span>もう一度入力</span></label>
+          <div class="pw"><input id="cp-confirm" type="password" name="confirm" autocomplete="new-password" required></div></div>
+        <button class="btn btn-block" type="submit">パスワードを変更</button>
+      </form>
+
+      <button class="btn btn-block btn-quiet" id="logout-btn">ログアウト</button>
+      <p class="version" id="version-label"></p>
+    </div>
+
+    <nav class="tabbar" aria-label="メニュー">
+      <button data-tab="find" aria-current="page"><span aria-hidden="true">🔍</span>さがす</button>
+      <button data-tab="me"><span aria-hidden="true">🙂</span>じぶん</button>
+    </nav>
+  </section>
+</div>
+
+<dialog id="member-dialog">
+  <button class="close" aria-label="とじる" data-close>×</button>
+  <div id="member-detail"></div>
+</dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="config.js?v=1.0.0"></script>
+<script src="app.js?v=1.0.0"></script>
+</body>
+</html>
