@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Mochiy+Pop+One&family=Zen+Maru+Gothic:wght@500;700&display=swap" rel="stylesheet">
 <!-- フロントを更新したら ?v= の数字を上げる（スマホのキャッシュ対策） -->
-<link rel="stylesheet" href="style.css?v=1.1.0">
+<link rel="stylesheet" href="style.css?v=1.2.0">
 </head>
 <body>
 <div id="app">
@@ -163,7 +163,7 @@
         <div class="field"><span>好きなこと<small>10個まで</small></span>
           <div class="tag-picker" id="me-tags"></div>
           <div class="voice-cta">
-            <button type="button" class="btn btn-voice btn-block" id="voice-open-btn"><span aria-hidden="true">🎙️</span>AIとおしゃべりして決める</button>
+            <button type="button" class="btn btn-voice btn-block" id="voice-hobby-btn"><span aria-hidden="true">🎙️</span>AIとおしゃべりして決める</button>
             <span class="voice-cta-note">質問に声で答えるだけで、好きなことをタグにまとめます</span>
           </div>
           <div class="ai-box">
@@ -175,6 +175,10 @@
         </div>
         <div class="field"><label for="prof-bio"><span>自己紹介<small>300文字まで</small></span></label>
           <textarea id="prof-bio" name="bio" rows="4" maxlength="300" placeholder="どんなふうにつながりたいか、ひとこと書いてみましょう"></textarea>
+          <div class="voice-cta">
+            <button type="button" class="btn btn-voice btn-block" id="voice-bio-btn"><span aria-hidden="true">🎙️</span>AIとおしゃべりして作る</button>
+            <span class="voice-cta-note">質問に声で答えるだけで、自己紹介の下書きができます（口調は下の「ゆるめ／ていねい／元気」で選べます）</span>
+          </div>
           <div class="ai-box">
             <span class="ai-label">AIに下書きを作ってもらう</span>
             <div class="tone" role="radiogroup" aria-label="口調">
@@ -222,19 +226,29 @@
   <h3 id="voice-title">好きなこと、聞かせてください</h3>
   <div class="voice-log" id="voice-log" aria-live="polite"></div>
   <div class="voice-interim" id="voice-interim"></div>
+  <div class="voice-wait" id="voice-wait" hidden><span class="voice-wait-bar" id="voice-wait-bar"></span></div>
   <div class="voice-controls">
     <button type="button" class="mic" id="voice-mic" aria-pressed="false" aria-describedby="voice-mic-label"><span aria-hidden="true">🎙️</span></button>
     <p class="mic-label" id="voice-mic-label">タップして話す</p>
     <label class="tts-toggle"><input type="checkbox" id="voice-tts" checked><span>AIの声を出す</span></label>
   </div>
   <form class="voice-text" id="voice-text-form">
-    <input id="voice-text" maxlength="300" placeholder="文字で答えることもできます" aria-label="文字で答える">
+    <input id="voice-text" maxlength="500" placeholder="文字で答えることもできます" aria-label="文字で答える">
     <button class="btn btn-small" type="submit">送る</button>
   </form>
-  <div class="voice-tags-wrap">
-    <p class="voice-tags-head">見つかった「好き」<small>タップで選ぶ・外す</small></p>
+
+  <!-- 好きなこと：タグ候補 -->
+  <div class="voice-result" id="voice-result-hobby">
+    <p class="voice-result-head">見つかった「好き」<small>タップで選ぶ・外す</small></p>
     <div class="tag-suggest" id="voice-tags"><span class="voice-empty">話すとここにタグが出てきます</span></div>
   </div>
+
+  <!-- 自己紹介：下書き -->
+  <div class="voice-result" id="voice-result-bio" hidden>
+    <label class="voice-result-head" for="voice-bio-draft">自己紹介の下書き<small>自由に直せます</small></label>
+    <textarea id="voice-bio-draft" rows="4" maxlength="300" placeholder="ふたこと、みこと話すと下書きができます"></textarea>
+  </div>
+
   <div class="voice-actions">
     <button type="button" class="btn btn-small btn-quiet" id="voice-finish">ここでまとめる</button>
     <button type="button" class="btn btn-primary" id="voice-apply">選んだタグを追加</button>
@@ -243,7 +257,7 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<script src="config.js?v=1.1.0"></script>
-<script src="app.js?v=1.1.0"></script>
+<script src="config.js?v=1.2.0"></script>
+<script src="app.js?v=1.2.0"></script>
 </body>
 </html>

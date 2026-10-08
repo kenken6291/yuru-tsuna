@@ -440,9 +440,21 @@ input:focus, select:focus, textarea:focus { outline: 3px solid var(--sky); outli
 .tts-toggle input { width: 18px; height: 18px; min-height: 0; accent-color: var(--ink); }
 .voice-text { display: flex; gap: 8px; }
 .voice-text input { flex: 1; min-height: 42px; }
-.voice-tags-wrap { border-top: 2px dashed #B9B6D6; padding-top: 10px; }
-.voice-tags-head { font-weight: 700; font-size: .9rem; margin-bottom: 8px; display: flex; gap: .6em; align-items: baseline; }
-.voice-tags-head small { font-weight: 500; color: var(--ink-soft); font-size: .78rem; }
+.voice-result { border-top: 2px dashed #B9B6D6; padding-top: 10px; }
+.voice-result-head { font-weight: 700; font-size: .9rem; margin: 0 0 8px; display: flex; gap: .6em; align-items: baseline; }
+.voice-result-head small { font-weight: 500; color: var(--ink-soft); font-size: .78rem; }
+.voice-result textarea { font-size: 15px; }
+.voice-wait {
+  height: 6px;
+  margin: -4px auto 0;
+  width: min(220px, 70%);
+  border: 1.5px solid var(--ink);
+  border-radius: 999px;
+  overflow: hidden;
+  background: #fff;
+}
+.voice-wait-bar { display: block; height: 100%; width: 100%; background: var(--mint); transform-origin: left; }
+@keyframes drain { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 .voice-empty { font-size: .85rem; color: var(--ink-soft); }
 .tag-suggest .stk-tag[disabled] { opacity: .5; }
 .voice-actions { display: flex; gap: 10px; align-items: center; }

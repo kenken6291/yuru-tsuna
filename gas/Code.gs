@@ -6,7 +6,7 @@
  * 更新したら VERSION を上げ、「デプロイを管理 → 編集 → 新バージョン」で再デプロイ（URL は変わらない）。
  */
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const APP_NAME = 'ゆるつな';
 const SHEET_USERS = 'Users';
 const HEADERS = [
@@ -23,6 +23,11 @@ const HASH_ROUNDS = 500;       // ストレッチング回数
 const AI_PER_HOUR = 20;        // AI 利用回数 / 人 / 時間
 const AI_CHAT_PER_HOUR = 60;   // 音声おしゃべり（1回の会話で数回呼ぶので別枠）
 const CHAT_MAX_TURNS = 6;      // ユーザー発言がこの回数に達したら締める
+const BIO_TONES = {
+  yuru: 'ゆるくて親しみやすい口調',
+  teinei: 'ていねいで落ち着いた口調',
+  genki: '明るく元気な口調（絵文字は1〜2個まで）'
+};
 const FORGOT_INTERVAL_SEC = 180; // 再発行の連打防止
 
 const PREFS = ['北海道','青森県','岩手県','宮城県','秋田県','山形県','福島県','茨城県','栃木県','群馬県','埼玉県','千葉県','東京都','神奈川県','新潟県','富山県','石川県','福井県','山梨県','長野県','岐阜県','静岡県','愛知県','三重県','滋賀県','京都府','大阪府','兵庫県','奈良県','和歌山県','鳥取県','島根県','岡山県','広島県','山口県','徳島県','香川県','愛媛県','高知県','福岡県','佐賀県','長崎県','熊本県','大分県','宮崎県','鹿児島県','沖縄県'];
@@ -52,7 +57,8 @@ function doPost(e) {
     listMembers: apiListMembers,
     aiSuggestTags: apiAiSuggestTags,
     aiWriteBio: apiAiWriteBio,
-    aiHobbyChat: apiAiHobbyChat
+    aiHobbyChat: apiAiHobbyChat,
+    aiBioChat: apiAiBioChat
   };
   const fn = routes[req.action];
   if (!fn) return json_({ ok: false, error: '不明な操作です' });
@@ -330,12 +336,7 @@ function apiAiWriteBio(req) {
   const area = cleanText_(req.area, 30);
   const hobbies = cleanHobbies_(req.hobbies);
   const keywords = cleanText_(req.keywords, 100);
-  const tones = {
-    yuru: 'ゆるくて親しみやすい口調',
-    teinei: 'ていねいで落ち着いた口調',
-    genki: '明るく元気な口調（絵文字は1〜2個まで）'
-  };
-  const tone = tones[req.tone] || tones.yuru;
+  const tone = BIO_TONES[req.tone] || BIO_TONES.yuru;
 
   const prompt = [
     '地域や趣味でゆるく友達を作るWebサービスの「自己紹介文」を3案作ってください。',
@@ -362,38 +363,51 @@ function apiAiWriteBio(req) {
   return { bios: bios };
 }
 
-// 音声（または文字）でAIとおしゃべりしながら「好きなこと」を引き出し、タグにまとめる
-function apiAiHobbyChat(req) {
-  const me = authUser_(req.token);
-  aiQuota_(me.userId, 'chat', AI_CHAT_PER_HOUR);
-
-  const msgs = (Array.isArray(req.messages) ? req.messages : [])
-    .slice(-14)
+// 会話履歴を整える（共通）
+function chatMsgs_(raw) {
+  const msgs = (Array.isArray(raw) ? raw : [])
+    .slice(-16)
     .map(function (m) {
-      return { role: m && m.role === 'user' ? 'user' : 'ai', text: cleanText_(m && m.text, 300) };
+      return { role: m && m.role === 'user' ? 'user' : 'ai', text: cleanText_(m && m.text, 500) };
     })
     .filter(function (m) { return m.text; });
   const userTurns = msgs.filter(function (m) { return m.role === 'user'; }).length;
   if (!userTurns) fail_('話した内容が届きませんでした。もう一度どうぞ');
-
-  const forceEnd = req.finish === true || userTurns >= CHAT_MAX_TURNS;
-  const current = cleanHobbies_(req.currentTags);
   const transcript = msgs.map(function (m) {
     return (m.role === 'user' ? 'ユーザー' : 'AI') + '：' + m.text;
   }).join('\n');
+  return { msgs: msgs, userTurns: userTurns, transcript: transcript };
+}
+
+const CHAT_COMMON_RULES = [
+  '- 返事は声に出して読みやすい話し言葉で、60文字以内。質問は1回に1つだけ',
+  '- 相手の答えに短く共感してから、具体的に深掘りする',
+  '- 本名・住所・勤務先・家族構成など、個人が特定されることは聞かない',
+  '- 音声認識の誤変換や言いよどみがありえる。意味が通らないときは推測するか、やさしく聞き返す'
+];
+
+function chatEndRule_(forceEnd, what) {
+  return forceEnd
+    ? '- 今回で会話を終える。お礼と、' + what + 'を伝えて締める。done は true'
+    : '- ユーザーの発言が3〜4回たまったか、相手が「もういい」「おわり」などと言ったら、お礼を言って締め、done を true にする。それまでは done は false';
+}
+
+// 音声（または文字）でAIとおしゃべりしながら「好きなこと」を引き出し、タグにまとめる
+function apiAiHobbyChat(req) {
+  const me = authUser_(req.token);
+  aiQuota_(me.userId, 'chat', AI_CHAT_PER_HOUR);
+  const c = chatMsgs_(req.messages);
+  const forceEnd = req.finish === true || c.userTurns >= CHAT_MAX_TURNS;
+  const current = cleanHobbies_(req.currentTags);
 
   const prompt = [
     'あなたは「' + APP_NAME + '」（地域や趣味でゆるく友達を作るサービス）の、話しやすい聞き役です。',
     'ユーザーと音声で会話しながら、その人の「好きなこと」を引き出し、趣味タグにまとめます。',
     '',
-    '会話のルール：',
-    '- 返事は声に出して読みやすい話し言葉で、60文字以内。質問は1回に1つだけ',
-    '- 相手の答えに短く共感してから、具体的に深掘りする（どんなところが好き？どのくらいの頻度？最近ハマっていることは？など）',
-    '- 本名・住所・勤務先・家族構成など、個人が特定されることは聞かない',
-    '- 音声認識の誤変換がありえる。意味が通らないときは推測するか、やさしく聞き返す',
-    forceEnd
-      ? '- 今回で会話を終える。お礼と、下に並んだタグから選んでほしいことを伝えて締める。done は true'
-      : '- ユーザーの発言が3〜4回たまったか、相手が「もういい」「おわり」などと言ったら、お礼を言って締め、done を true にする。それまでは done は false',
+    '会話のルール：'
+  ].concat(CHAT_COMMON_RULES, [
+    '- 深掘りの例：どんなところが好き？どのくらいの頻度？最近ハマっていることは？',
+    chatEndRule_(forceEnd, '下に並んだタグから選んでほしいこと'),
     '',
     'タグのルール：',
     '- これまでの会話全体から、その人に合う趣味タグを最大8個',
@@ -403,8 +417,8 @@ function apiAiHobbyChat(req) {
     '出力はJSONのみ：{"reply":"返事","tags":["タグ1","タグ2"],"done":false}',
     '',
     'これまでの会話：',
-    transcript
-  ].join('\n');
+    c.transcript
+  ]).join('\n');
 
   const r = gemini_(prompt) || {};
   const reply = cleanText_(r.reply, 200) ||
@@ -415,6 +429,56 @@ function apiAiHobbyChat(req) {
     .filter(function (t, i, a) { return a.indexOf(t) === i; })
     .slice(0, 8);
   return { reply: reply, tags: tags, done: forceEnd || r.done === true };
+}
+
+// 音声（または文字）でAIとおしゃべりしながら、自己紹介文を一緒に作る
+function apiAiBioChat(req) {
+  const me = authUser_(req.token);
+  aiQuota_(me.userId, 'chat', AI_CHAT_PER_HOUR);
+  const c = chatMsgs_(req.messages);
+  const forceEnd = req.finish === true || c.userTurns >= CHAT_MAX_TURNS;
+
+  const nickname = cleanText_(req.nickname, 20) || me.nickname;
+  const prefecture = PREFS.indexOf(req.prefecture) >= 0 ? req.prefecture : me.prefecture;
+  const area = cleanText_(req.area, 30);
+  const hobbies = cleanHobbies_(req.hobbies);
+  const tone = BIO_TONES[req.tone] || BIO_TONES.yuru;
+
+  const prompt = [
+    'あなたは「' + APP_NAME + '」（地域や趣味でゆるく友達を作るサービス）の、話しやすい聞き役です。',
+    'ユーザーと音声で会話しながら、プロフィールに載せる「自己紹介文」を一緒に作ります。',
+    '',
+    'ユーザーの情報：',
+    '- ニックネーム：' + nickname,
+    '- 地域：' + prefecture + (area ? ' ' + area : ''),
+    '- 好きなこと：' + (hobbies.length ? hobbies.join('、') : splitH_(me.hobbies).join('、')),
+    '',
+    '会話のルール：'
+  ].concat(CHAT_COMMON_RULES, [
+    '- 聞くことの候補（会話にまだ出ていないものから1つずつ）：自分はどんな人か、好きなことの具体的な楽しみ方、どんな人とどうつながりたいか（一緒に出かける・情報交換・のんびり話す等）、動きやすい曜日や時間帯（ざっくり）',
+    chatEndRule_(forceEnd, '下の下書きを自由に直して使ってほしいこと'),
+    '',
+    '下書きのルール：',
+    '- 会話で出た内容とユーザーの情報だけで、80〜150文字の自己紹介文を作る（情報が少なくても、わかる範囲で作る）',
+    '- 口調：' + tone + '。一人称の文章にする',
+    '- 話していない経歴・実績・性格をでっちあげない',
+    '- 本名・詳しい住所・勤務先など個人が特定される情報は入れない',
+    '- 最後は、初めての人も声をかけやすい一言で締める',
+    '',
+    '出力はJSONのみ：{"reply":"返事","bio":"自己紹介の下書き","done":false}',
+    '',
+    'これまでの会話：',
+    c.transcript
+  ]).join('\n');
+
+  const r = gemini_(prompt) || {};
+  const reply = cleanText_(r.reply, 200) ||
+    (forceEnd ? 'ありがとうございました！下の下書きを自由に直して使ってください。' : 'なるほど！もう少し教えてもらえますか？');
+  return {
+    reply: reply,
+    bio: cleanText_(r.bio, 300, true),
+    done: forceEnd || r.done === true
+  };
 }
 
 function gemini_(prompt) {

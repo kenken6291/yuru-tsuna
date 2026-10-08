@@ -3,7 +3,7 @@
   'use strict';
 
   const CFG = window.APP_CONFIG || {};
-  const FRONT_VERSION = '1.1.0';
+  const FRONT_VERSION = '1.2.0';
   const TOKEN_KEY = 'yurutsuna_token';
   const MAX_TAGS = 10;
 
@@ -545,24 +545,54 @@
     });
   });
 
-  /* ---------- 音声でAIとおしゃべりして「好き」を見つける ---------- */
+  /* ---------- 音声でAIとおしゃべり（好きなこと／自己紹介） ---------- */
 
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  const VOICE_GREETING = 'こんにちは！お休みの日は、どんなふうに過ごすことが多いですか？';
-  const voice = { msgs: [], tags: [], picked: new Set(), rec: null, listening: false, waiting: false, done: false, finalText: '' };
+  const SILENCE_MS = 3500;     // 話が止まってから、これだけ黙っていたら送る（考えながら話す間を待つ）
+  const NO_SPEECH_MS = 15000;  // ひとことも話さないときに待つ上限
+  const MAX_LISTEN_MS = 120000; // 1回の聞き取りの上限
+
+  const VOICE_MODES = {
+    hobby: {
+      title: '好きなこと、聞かせてください',
+      greeting: 'こんにちは！お休みの日は、どんなふうに過ごすことが多いですか？',
+      action: 'aiHobbyChat',
+      apply: '選んだタグを追加'
+    },
+    bio: {
+      title: '自己紹介を一緒に作りましょう',
+      greeting: 'こんにちは！自己紹介を一緒に作りましょう。まず、ご自身はどんな人だと思いますか？ざっくりで大丈夫です。',
+      action: 'aiBioChat',
+      apply: 'この自己紹介を使う'
+    }
+  };
+
+  const voice = {
+    mode: 'hobby', msgs: [], tags: [], picked: new Set(),
+    rec: null, listening: false, waiting: false, done: false, fatal: false,
+    committed: '', session: '', interim: '', heard: false, startedAt: 0, timer: null
+  };
   const vDialog = $('#voice-dialog');
   const vMic = $('#voice-mic');
 
-  function openVoice() {
-    voice.msgs = [{ role: 'ai', text: VOICE_GREETING }];
+  function openVoice(mode) {
+    const cfg = VOICE_MODES[mode];
+    voice.mode = mode;
+    voice.msgs = [{ role: 'ai', text: cfg.greeting }];
     voice.tags = [];
     voice.picked = new Set();
     voice.done = false;
     voice.waiting = false;
+    $('#voice-title').textContent = cfg.title;
+    $('#voice-apply').textContent = cfg.apply;
+    $('#voice-result-hobby').hidden = mode !== 'hobby';
+    $('#voice-result-bio').hidden = mode !== 'bio';
+    $('#voice-bio-draft').value = '';
     $('#voice-log').innerHTML = '';
     $('#voice-interim').textContent = '';
     $('#voice-text').value = '';
-    addBubble('ai', VOICE_GREETING);
+    $('#voice-wait').hidden = true;
+    addBubble('ai', cfg.greeting);
     renderVoiceTags();
     if (!SR) {
       vMic.hidden = true;
@@ -571,7 +601,7 @@
       setMicState('idle');
     }
     if (vDialog.showModal) vDialog.showModal(); else vDialog.setAttribute('open', '');
-    speak(VOICE_GREETING);
+    speak(cfg.greeting);
   }
 
   function addBubble(role, text, typing = false) {
@@ -588,15 +618,17 @@
     if (!SR) return;
     const labels = {
       idle: 'タップして話す',
-      listening: '聞いています…（話し終わったらタップ）',
+      listening: '聞いています。ゆっくりで大丈夫です',
+      heard: '話し終わったら少し待つと送ります（すぐ送るならタップ）',
       thinking: 'AIが考えています…',
       done: 'まだ話したいときはタップ'
     };
-    vMic.classList.toggle('listening', s === 'listening');
+    const on = s === 'listening' || s === 'heard';
+    vMic.classList.toggle('listening', on);
     vMic.classList.toggle('thinking', s === 'thinking');
     vMic.disabled = s === 'thinking';
-    vMic.setAttribute('aria-pressed', String(s === 'listening'));
-    vMic.setAttribute('aria-label', s === 'listening' ? '話し終わる' : '話しはじめる');
+    vMic.setAttribute('aria-pressed', String(on));
+    vMic.setAttribute('aria-label', on ? '話し終わって送る' : '話しはじめる');
     $('#voice-mic-label').textContent = labels[s];
   }
 
@@ -608,7 +640,7 @@
   }
   if (window.speechSynthesis) {
     pickVoice();
-    speechSynthesis.addEventListener && speechSynthesis.addEventListener('voiceschanged', pickVoice);
+    if (speechSynthesis.addEventListener) speechSynthesis.addEventListener('voiceschanged', pickVoice);
   }
 
   function speak(text) {
@@ -621,61 +653,125 @@
     speechSynthesis.speak(u);
   }
 
+  // 閉じる・中断（送らない）
   function stopVoiceIO() {
-    if (voice.rec) { try { voice.rec.abort(); } catch (e) {} }
+    clearTimeout(voice.timer);
+    const rec = voice.rec;
     voice.rec = null;
     voice.listening = false;
+    voice.committed = voice.session = voice.interim = '';
+    if (rec) { try { rec.abort(); } catch (e) {} }
+    $('#voice-wait').hidden = true;
+    $('#voice-interim').textContent = '';
     if (window.speechSynthesis) speechSynthesis.cancel();
   }
 
+  // 無音タイマー：新しい言葉が届くたびにリセット
+  function armTimer(ms, showBar) {
+    clearTimeout(voice.timer);
+    voice.timer = setTimeout(() => { if (voice.listening) stopListening(); }, ms);
+    const wait = $('#voice-wait');
+    const bar = $('#voice-wait-bar');
+    wait.hidden = !showBar;
+    if (showBar) {
+      bar.style.animation = 'none';
+      void bar.offsetWidth;
+      bar.style.animation = `drain ${ms}ms linear forwards`;
+    }
+  }
+
   function startListening() {
-    if (!SR || voice.waiting) return;
+    if (!SR || voice.waiting || voice.listening) return;
     if (window.speechSynthesis) speechSynthesis.cancel(); // AIの声を拾わないように
+    voice.listening = true;
+    voice.fatal = false;
+    voice.heard = false;
+    voice.committed = voice.session = voice.interim = '';
+    voice.startedAt = Date.now();
+    setMicState('listening');
+    armTimer(NO_SPEECH_MS, false);
+    startRecSession();
+  }
+
+  // ブラウザは数秒の無音で勝手に認識を終えることがあるので、聞き取り中は自動でつなぎ直す
+  function startRecSession() {
     const rec = new SR();
     rec.lang = 'ja-JP';
     rec.interimResults = true;
-    rec.continuous = false;
+    rec.continuous = true;
     rec.maxAlternatives = 1;
-    voice.finalText = '';
-    let interim = '';
 
     rec.onresult = e => {
-      interim = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
+      let fin = '', inter = '';
+      for (let i = 0; i < e.results.length; i++) {
         const r = e.results[i];
-        if (r.isFinal) voice.finalText += r[0].transcript;
-        else interim += r[0].transcript;
+        if (r.isFinal) fin += r[0].transcript;
+        else inter += r[0].transcript;
       }
-      $('#voice-interim').textContent = voice.finalText + interim;
+      voice.session = fin;
+      voice.interim = inter;
+      const all = (voice.committed + fin + inter).trim();
+      $('#voice-interim').textContent = all;
+      if (all) {
+        if (!voice.heard) { voice.heard = true; setMicState('heard'); }
+        armTimer(SILENCE_MS, true);
+      }
     };
     rec.onerror = e => {
       if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        voice.fatal = true;
         toast('マイクが使えません。ブラウザの設定でマイクを許可するか、文字で答えてください', 'error');
-      } else if (e.error === 'no-speech') {
-        toast('声が聞き取れませんでした。もう一度どうぞ');
-      } else if (e.error === 'network') {
-        toast('音声認識の通信に失敗しました。文字でも答えられます', 'error');
+      } else if (e.error === 'network' || e.error === 'audio-capture') {
+        voice.fatal = true;
+        toast('音声を聞き取れませんでした。文字でも答えられます', 'error');
       }
+      // no-speech / aborted は onend でつなぎ直す
     };
     rec.onend = () => {
       if (voice.rec !== rec) return; // 閉じた・中断した
+      voice.committed += voice.session + voice.interim;
+      voice.session = voice.interim = '';
       voice.rec = null;
-      voice.listening = false;
-      const text = (voice.finalText || interim).trim();
-      $('#voice-interim').textContent = '';
-      if (text && vDialog.open) sendVoice(text);
-      else setMicState(voice.done ? 'done' : 'idle');
+      if (voice.listening && !voice.fatal && Date.now() - voice.startedAt < MAX_LISTEN_MS) {
+        try { startRecSession(); return; } catch (err) { /* 下で終了 */ }
+      }
+      finishListening();
     };
 
     voice.rec = rec;
-    voice.listening = true;
-    setMicState('listening');
     try { rec.start(); }
-    catch (e) { voice.rec = null; voice.listening = false; setMicState('idle'); }
+    catch (e) { voice.rec = null; finishListening(); }
+  }
+
+  // 話し終わり（無音タイマー or タップ）：認識を止め、onend で送信
+  function stopListening() {
+    clearTimeout(voice.timer);
+    voice.listening = false;
+    if (voice.rec) {
+      try { voice.rec.stop(); } catch (e) { voice.rec = null; finishListening(); }
+    } else {
+      finishListening();
+    }
+  }
+
+  function finishListening() {
+    clearTimeout(voice.timer);
+    voice.listening = false;
+    const text = (voice.committed + voice.session + voice.interim).trim();
+    voice.committed = voice.session = voice.interim = '';
+    $('#voice-interim').textContent = '';
+    $('#voice-wait').hidden = true;
+    if (!vDialog.open) return;
+    if (text) {
+      sendVoice(text);
+    } else {
+      setMicState(voice.done ? 'done' : 'idle');
+      if (!voice.fatal) toast('声が聞き取れませんでした。もう一度どうぞ');
+    }
   }
 
   vMic.addEventListener('click', () => {
-    if (voice.listening && voice.rec) voice.rec.stop(); // 止めると onend で送信
+    if (voice.listening) stopListening(); // タップで今すぐ送る
     else startListening();
   });
 
@@ -684,6 +780,7 @@
     const inp = $('#voice-text');
     const text = inp.value.trim();
     if (!text || voice.waiting) return;
+    if (voice.listening) stopVoiceIO();
     inp.value = '';
     sendVoice(text);
   });
@@ -695,17 +792,31 @@
     askAi(false);
   }
 
+  function voicePayload(finish) {
+    const base = { messages: voice.msgs, finish };
+    if (voice.mode === 'hobby') return Object.assign(base, { currentTags: [...state.meTags] });
+    const f = $('#form-profile');
+    return Object.assign(base, {
+      nickname: f.nickname.value.trim(),
+      prefecture: f.prefecture.value,
+      area: f.area.value.trim(),
+      hobbies: [...state.meTags],
+      tone: ($('input[name=tone]:checked', f) || {}).value || 'yuru'
+    });
+  }
+
   async function askAi(finish) {
     voice.waiting = true;
     setMicState('thinking');
     const typing = addBubble('ai', '…', true);
     try {
-      const r = await api('aiHobbyChat', { messages: voice.msgs, currentTags: [...state.meTags], finish });
+      const r = await api(VOICE_MODES[voice.mode].action, voicePayload(finish));
       typing.remove();
       if (!vDialog.open) return;
       addBubble('ai', r.reply);
       voice.msgs.push({ role: 'ai', text: r.reply });
-      mergeVoiceTags(r.tags || []);
+      if (voice.mode === 'hobby') mergeVoiceTags(r.tags || []);
+      else if (r.bio) $('#voice-bio-draft').value = r.bio;
       voice.done = !!r.done;
       speak(r.reply);
     } catch (e) {
@@ -751,16 +862,27 @@
     });
   }
 
-  $('#voice-open-btn').addEventListener('click', openVoice);
+  $('#voice-hobby-btn').addEventListener('click', () => openVoice('hobby'));
+  $('#voice-bio-btn').addEventListener('click', () => openVoice('bio'));
 
   $('#voice-finish').addEventListener('click', () => {
     if (voice.waiting) return;
+    if (voice.listening) { stopListening(); return; } // 話している途中ならまずそれを送る
     if (!voice.msgs.some(m => m.role === 'user')) return toast('まずはひとこと話してみてください');
-    stopVoiceIO();
     askAi(true);
   });
 
   $('#voice-apply').addEventListener('click', () => {
+    if (voice.mode === 'bio') {
+      const text = $('#voice-bio-draft').value.trim();
+      if (!text) return toast('まだ下書きがありません。少し話してみてください');
+      const bio = $('#prof-bio');
+      if (bio.value.trim() && !confirm('いまの自己紹介を、この下書きに置き換えますか？')) return;
+      bio.value = text.slice(0, 300);
+      vDialog.close();
+      toast('自己紹介に入れました。「プロフィールを保存」で反映されます');
+      return;
+    }
     const add = [...voice.picked].filter(t => !state.meTags.has(t));
     if (!add.length) return toast('追加するタグを選んでください');
     let added = 0;
