@@ -6,7 +6,7 @@
  * 更新したら VERSION を上げ、「デプロイを管理 → 編集 → 新バージョン」で再デプロイ（URL は変わらない）。
  */
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const APP_NAME = 'ゆるつな';
 const SHEET_USERS = 'Users';
 const HEADERS = [
@@ -21,6 +21,8 @@ const MAX_FAIL = 5;            // 連続失敗でロック
 const LOCK_MIN = 15;           // ロック時間（分）
 const HASH_ROUNDS = 500;       // ストレッチング回数
 const AI_PER_HOUR = 20;        // AI 利用回数 / 人 / 時間
+const AI_CHAT_PER_HOUR = 60;   // 音声おしゃべり（1回の会話で数回呼ぶので別枠）
+const CHAT_MAX_TURNS = 6;      // ユーザー発言がこの回数に達したら締める
 const FORGOT_INTERVAL_SEC = 180; // 再発行の連打防止
 
 const PREFS = ['北海道','青森県','岩手県','宮城県','秋田県','山形県','福島県','茨城県','栃木県','群馬県','埼玉県','千葉県','東京都','神奈川県','新潟県','富山県','石川県','福井県','山梨県','長野県','岐阜県','静岡県','愛知県','三重県','滋賀県','京都府','大阪府','兵庫県','奈良県','和歌山県','鳥取県','島根県','岡山県','広島県','山口県','徳島県','香川県','愛媛県','高知県','福岡県','佐賀県','長崎県','熊本県','大分県','宮崎県','鹿児島県','沖縄県'];
@@ -49,7 +51,8 @@ function doPost(e) {
     uploadIcon: apiUploadIcon,
     listMembers: apiListMembers,
     aiSuggestTags: apiAiSuggestTags,
-    aiWriteBio: apiAiWriteBio
+    aiWriteBio: apiAiWriteBio,
+    aiHobbyChat: apiAiHobbyChat
   };
   const fn = routes[req.action];
   if (!fn) return json_({ ok: false, error: '不明な操作です' });
@@ -294,7 +297,7 @@ function apiListMembers(req) {
 
 function apiAiSuggestTags(req) {
   const me = authUser_(req.token);
-  aiQuota_(me.userId);
+  aiQuota_(me.userId, 'ai', AI_PER_HOUR);
   const text = cleanText_(req.text, 300, true);
   if (!text) fail_('好きなことを少し書いてください');
 
@@ -321,7 +324,7 @@ function apiAiSuggestTags(req) {
 
 function apiAiWriteBio(req) {
   const me = authUser_(req.token);
-  aiQuota_(me.userId);
+  aiQuota_(me.userId, 'ai', AI_PER_HOUR);
   const nickname = cleanText_(req.nickname, 20) || me.nickname;
   const prefecture = PREFS.indexOf(req.prefecture) >= 0 ? req.prefecture : me.prefecture;
   const area = cleanText_(req.area, 30);
@@ -359,6 +362,61 @@ function apiAiWriteBio(req) {
   return { bios: bios };
 }
 
+// 音声（または文字）でAIとおしゃべりしながら「好きなこと」を引き出し、タグにまとめる
+function apiAiHobbyChat(req) {
+  const me = authUser_(req.token);
+  aiQuota_(me.userId, 'chat', AI_CHAT_PER_HOUR);
+
+  const msgs = (Array.isArray(req.messages) ? req.messages : [])
+    .slice(-14)
+    .map(function (m) {
+      return { role: m && m.role === 'user' ? 'user' : 'ai', text: cleanText_(m && m.text, 300) };
+    })
+    .filter(function (m) { return m.text; });
+  const userTurns = msgs.filter(function (m) { return m.role === 'user'; }).length;
+  if (!userTurns) fail_('話した内容が届きませんでした。もう一度どうぞ');
+
+  const forceEnd = req.finish === true || userTurns >= CHAT_MAX_TURNS;
+  const current = cleanHobbies_(req.currentTags);
+  const transcript = msgs.map(function (m) {
+    return (m.role === 'user' ? 'ユーザー' : 'AI') + '：' + m.text;
+  }).join('\n');
+
+  const prompt = [
+    'あなたは「' + APP_NAME + '」（地域や趣味でゆるく友達を作るサービス）の、話しやすい聞き役です。',
+    'ユーザーと音声で会話しながら、その人の「好きなこと」を引き出し、趣味タグにまとめます。',
+    '',
+    '会話のルール：',
+    '- 返事は声に出して読みやすい話し言葉で、60文字以内。質問は1回に1つだけ',
+    '- 相手の答えに短く共感してから、具体的に深掘りする（どんなところが好き？どのくらいの頻度？最近ハマっていることは？など）',
+    '- 本名・住所・勤務先・家族構成など、個人が特定されることは聞かない',
+    '- 音声認識の誤変換がありえる。意味が通らないときは推測するか、やさしく聞き返す',
+    forceEnd
+      ? '- 今回で会話を終える。お礼と、下に並んだタグから選んでほしいことを伝えて締める。done は true'
+      : '- ユーザーの発言が3〜4回たまったか、相手が「もういい」「おわり」などと言ったら、お礼を言って締め、done を true にする。それまでは done は false',
+    '',
+    'タグのルール：',
+    '- これまでの会話全体から、その人に合う趣味タグを最大8個',
+    '- 1つ8文字以内。同じ趣味の人が探しやすい一般的な言葉（例：カフェ、散歩、サウナ、キャンプ）',
+    '- すでに選んでいるタグ：' + (current.length ? current.join('、') : 'なし'),
+    '',
+    '出力はJSONのみ：{"reply":"返事","tags":["タグ1","タグ2"],"done":false}',
+    '',
+    'これまでの会話：',
+    transcript
+  ].join('\n');
+
+  const r = gemini_(prompt) || {};
+  const reply = cleanText_(r.reply, 200) ||
+    (forceEnd ? 'ありがとうございました！下のタグから選んでみてください。' : 'なるほど！もう少し教えてもらえますか？');
+  const tags = (Array.isArray(r.tags) ? r.tags : [])
+    .map(function (t) { return cleanText_(t, 12).replace(/,/g, ''); })
+    .filter(Boolean)
+    .filter(function (t, i, a) { return a.indexOf(t) === i; })
+    .slice(0, 8);
+  return { reply: reply, tags: tags, done: forceEnd || r.done === true };
+}
+
 function gemini_(prompt) {
   const key = prop_('GEMINI_API_KEY');
   if (!key) fail_('AI機能は準備中です（APIキー未設定）');
@@ -388,11 +446,11 @@ function gemini_(prompt) {
   }
 }
 
-function aiQuota_(userId) {
+function aiQuota_(userId, kind, limit) {
   const c = CacheService.getScriptCache();
-  const k = 'ai_' + userId;
+  const k = kind + '_' + userId;
   const n = Number(c.get(k) || 0);
-  if (n >= AI_PER_HOUR) fail_('AIのお手伝いは1時間に' + AI_PER_HOUR + '回までです。少し休憩してからどうぞ');
+  if (n >= limit) fail_('AIのお手伝いは1時間に' + limit + '回までです。少し休憩してからどうぞ');
   c.put(k, String(n + 1), 3600);
 }
 

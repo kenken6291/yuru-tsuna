@@ -3,7 +3,7 @@
   'use strict';
 
   const CFG = window.APP_CONFIG || {};
-  const FRONT_VERSION = '1.0.0';
+  const FRONT_VERSION = '1.1.0';
   const TOKEN_KEY = 'yurutsuna_token';
   const MAX_TAGS = 10;
 
@@ -543,6 +543,244 @@
         box.appendChild(d);
       });
     });
+  });
+
+  /* ---------- 音声でAIとおしゃべりして「好き」を見つける ---------- */
+
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const VOICE_GREETING = 'こんにちは！お休みの日は、どんなふうに過ごすことが多いですか？';
+  const voice = { msgs: [], tags: [], picked: new Set(), rec: null, listening: false, waiting: false, done: false, finalText: '' };
+  const vDialog = $('#voice-dialog');
+  const vMic = $('#voice-mic');
+
+  function openVoice() {
+    voice.msgs = [{ role: 'ai', text: VOICE_GREETING }];
+    voice.tags = [];
+    voice.picked = new Set();
+    voice.done = false;
+    voice.waiting = false;
+    $('#voice-log').innerHTML = '';
+    $('#voice-interim').textContent = '';
+    $('#voice-text').value = '';
+    addBubble('ai', VOICE_GREETING);
+    renderVoiceTags();
+    if (!SR) {
+      vMic.hidden = true;
+      $('#voice-mic-label').textContent = 'このブラウザは音声入力に対応していません。文字で答えてください（スマホはChromeかSafariがおすすめ）';
+    } else {
+      setMicState('idle');
+    }
+    if (vDialog.showModal) vDialog.showModal(); else vDialog.setAttribute('open', '');
+    speak(VOICE_GREETING);
+  }
+
+  function addBubble(role, text, typing = false) {
+    const b = document.createElement('div');
+    b.className = 'bubble ' + role + (typing ? ' typing' : '');
+    b.textContent = text;
+    const log = $('#voice-log');
+    log.appendChild(b);
+    log.scrollTop = log.scrollHeight;
+    return b;
+  }
+
+  function setMicState(s) {
+    if (!SR) return;
+    const labels = {
+      idle: 'タップして話す',
+      listening: '聞いています…（話し終わったらタップ）',
+      thinking: 'AIが考えています…',
+      done: 'まだ話したいときはタップ'
+    };
+    vMic.classList.toggle('listening', s === 'listening');
+    vMic.classList.toggle('thinking', s === 'thinking');
+    vMic.disabled = s === 'thinking';
+    vMic.setAttribute('aria-pressed', String(s === 'listening'));
+    vMic.setAttribute('aria-label', s === 'listening' ? '話し終わる' : '話しはじめる');
+    $('#voice-mic-label').textContent = labels[s];
+  }
+
+  let jaVoice = null;
+  function pickVoice() {
+    if (!window.speechSynthesis) return;
+    const vs = speechSynthesis.getVoices();
+    jaVoice = vs.find(v => v.lang === 'ja-JP' && /Google|Kyoko|Otoya|Nanami|Haruka/.test(v.name)) || vs.find(v => /^ja/.test(v.lang)) || null;
+  }
+  if (window.speechSynthesis) {
+    pickVoice();
+    speechSynthesis.addEventListener && speechSynthesis.addEventListener('voiceschanged', pickVoice);
+  }
+
+  function speak(text) {
+    if (!window.speechSynthesis || !$('#voice-tts').checked) return;
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'ja-JP';
+    u.rate = 1.05;
+    if (jaVoice) u.voice = jaVoice;
+    speechSynthesis.speak(u);
+  }
+
+  function stopVoiceIO() {
+    if (voice.rec) { try { voice.rec.abort(); } catch (e) {} }
+    voice.rec = null;
+    voice.listening = false;
+    if (window.speechSynthesis) speechSynthesis.cancel();
+  }
+
+  function startListening() {
+    if (!SR || voice.waiting) return;
+    if (window.speechSynthesis) speechSynthesis.cancel(); // AIの声を拾わないように
+    const rec = new SR();
+    rec.lang = 'ja-JP';
+    rec.interimResults = true;
+    rec.continuous = false;
+    rec.maxAlternatives = 1;
+    voice.finalText = '';
+    let interim = '';
+
+    rec.onresult = e => {
+      interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const r = e.results[i];
+        if (r.isFinal) voice.finalText += r[0].transcript;
+        else interim += r[0].transcript;
+      }
+      $('#voice-interim').textContent = voice.finalText + interim;
+    };
+    rec.onerror = e => {
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        toast('マイクが使えません。ブラウザの設定でマイクを許可するか、文字で答えてください', 'error');
+      } else if (e.error === 'no-speech') {
+        toast('声が聞き取れませんでした。もう一度どうぞ');
+      } else if (e.error === 'network') {
+        toast('音声認識の通信に失敗しました。文字でも答えられます', 'error');
+      }
+    };
+    rec.onend = () => {
+      if (voice.rec !== rec) return; // 閉じた・中断した
+      voice.rec = null;
+      voice.listening = false;
+      const text = (voice.finalText || interim).trim();
+      $('#voice-interim').textContent = '';
+      if (text && vDialog.open) sendVoice(text);
+      else setMicState(voice.done ? 'done' : 'idle');
+    };
+
+    voice.rec = rec;
+    voice.listening = true;
+    setMicState('listening');
+    try { rec.start(); }
+    catch (e) { voice.rec = null; voice.listening = false; setMicState('idle'); }
+  }
+
+  vMic.addEventListener('click', () => {
+    if (voice.listening && voice.rec) voice.rec.stop(); // 止めると onend で送信
+    else startListening();
+  });
+
+  $('#voice-text-form').addEventListener('submit', e => {
+    e.preventDefault();
+    const inp = $('#voice-text');
+    const text = inp.value.trim();
+    if (!text || voice.waiting) return;
+    inp.value = '';
+    sendVoice(text);
+  });
+
+  function sendVoice(text) {
+    if (voice.waiting) return;
+    addBubble('user', text);
+    voice.msgs.push({ role: 'user', text });
+    askAi(false);
+  }
+
+  async function askAi(finish) {
+    voice.waiting = true;
+    setMicState('thinking');
+    const typing = addBubble('ai', '…', true);
+    try {
+      const r = await api('aiHobbyChat', { messages: voice.msgs, currentTags: [...state.meTags], finish });
+      typing.remove();
+      if (!vDialog.open) return;
+      addBubble('ai', r.reply);
+      voice.msgs.push({ role: 'ai', text: r.reply });
+      mergeVoiceTags(r.tags || []);
+      voice.done = !!r.done;
+      speak(r.reply);
+    } catch (e) {
+      typing.remove();
+      if (e.code === 'SESSION' || e.code === 'MUST_CHANGE') vDialog.close();
+      toast(e.message, 'error');
+    } finally {
+      voice.waiting = false;
+      setMicState(voice.done ? 'done' : 'idle');
+    }
+  }
+
+  function mergeVoiceTags(tags) {
+    tags.forEach(t => {
+      if (voice.tags.includes(t)) return;
+      voice.tags.push(t);
+      if (!state.meTags.has(t)) voice.picked.add(t); // 新しく見つかったものは最初から選んでおく
+    });
+    renderVoiceTags();
+  }
+
+  function renderVoiceTags() {
+    const box = $('#voice-tags');
+    box.innerHTML = '';
+    if (!voice.tags.length) {
+      box.innerHTML = '<span class="voice-empty">話すとここにタグが出てきます</span>';
+      return;
+    }
+    voice.tags.forEach((t, i) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'stk-tag c' + (i % 4);
+      b.style.setProperty('--tilt', TILTS[i % TILTS.length] + 'deg');
+      const already = state.meTags.has(t);
+      b.textContent = (EMOJI[t] || '🏷️') + ' ' + t + (already ? '（追加済み）' : '');
+      b.disabled = already;
+      b.setAttribute('aria-pressed', String(already || voice.picked.has(t)));
+      b.addEventListener('click', () => {
+        if (voice.picked.has(t)) voice.picked.delete(t); else voice.picked.add(t);
+        b.setAttribute('aria-pressed', String(voice.picked.has(t)));
+      });
+      box.appendChild(b);
+    });
+  }
+
+  $('#voice-open-btn').addEventListener('click', openVoice);
+
+  $('#voice-finish').addEventListener('click', () => {
+    if (voice.waiting) return;
+    if (!voice.msgs.some(m => m.role === 'user')) return toast('まずはひとこと話してみてください');
+    stopVoiceIO();
+    askAi(true);
+  });
+
+  $('#voice-apply').addEventListener('click', () => {
+    const add = [...voice.picked].filter(t => !state.meTags.has(t));
+    if (!add.length) return toast('追加するタグを選んでください');
+    let added = 0;
+    for (const t of add) {
+      if (state.meTags.size >= MAX_TAGS) break;
+      state.meTags.add(t);
+      added++;
+    }
+    renderTagPicker($('#me-tags'), state.meTags);
+    vDialog.close();
+    if (added < add.length) toast(`${MAX_TAGS}個までなので、${added}個だけ追加しました。「プロフィールを保存」で反映されます`);
+    else toast(`${added}個追加しました。「プロフィールを保存」で反映されます`);
+  });
+
+  vDialog.addEventListener('click', e => {
+    if (e.target.matches('[data-close]')) vDialog.close();
+  });
+  vDialog.addEventListener('close', stopVoiceIO);
+  $('#voice-tts').addEventListener('change', e => {
+    if (!e.target.checked && window.speechSynthesis) speechSynthesis.cancel();
   });
 
   // パスワード変更（通常）

@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Mochiy+Pop+One&family=Zen+Maru+Gothic:wght@500;700&display=swap" rel="stylesheet">
 <!-- フロントを更新したら ?v= の数字を上げる（スマホのキャッシュ対策） -->
-<link rel="stylesheet" href="style.css?v=1.0.0">
+<link rel="stylesheet" href="style.css?v=1.1.0">
 </head>
 <body>
 <div id="app">
@@ -162,6 +162,10 @@
         </div>
         <div class="field"><span>好きなこと<small>10個まで</small></span>
           <div class="tag-picker" id="me-tags"></div>
+          <div class="voice-cta">
+            <button type="button" class="btn btn-voice btn-block" id="voice-open-btn"><span aria-hidden="true">🎙️</span>AIとおしゃべりして決める</button>
+            <span class="voice-cta-note">質問に声で答えるだけで、好きなことをタグにまとめます</span>
+          </div>
           <div class="ai-box">
             <label class="ai-label" for="ai-tag-text">好きなことを文章で書くと、AIがタグを提案します</label>
             <textarea id="ai-tag-text" rows="2" maxlength="300" placeholder="例：休日は近所の喫茶店めぐり。最近ととのうのにハマってます"></textarea>
@@ -213,9 +217,33 @@
   <div id="member-detail"></div>
 </dialog>
 
+<dialog id="voice-dialog" aria-labelledby="voice-title">
+  <button class="close" aria-label="とじる" data-close>×</button>
+  <h3 id="voice-title">好きなこと、聞かせてください</h3>
+  <div class="voice-log" id="voice-log" aria-live="polite"></div>
+  <div class="voice-interim" id="voice-interim"></div>
+  <div class="voice-controls">
+    <button type="button" class="mic" id="voice-mic" aria-pressed="false" aria-describedby="voice-mic-label"><span aria-hidden="true">🎙️</span></button>
+    <p class="mic-label" id="voice-mic-label">タップして話す</p>
+    <label class="tts-toggle"><input type="checkbox" id="voice-tts" checked><span>AIの声を出す</span></label>
+  </div>
+  <form class="voice-text" id="voice-text-form">
+    <input id="voice-text" maxlength="300" placeholder="文字で答えることもできます" aria-label="文字で答える">
+    <button class="btn btn-small" type="submit">送る</button>
+  </form>
+  <div class="voice-tags-wrap">
+    <p class="voice-tags-head">見つかった「好き」<small>タップで選ぶ・外す</small></p>
+    <div class="tag-suggest" id="voice-tags"><span class="voice-empty">話すとここにタグが出てきます</span></div>
+  </div>
+  <div class="voice-actions">
+    <button type="button" class="btn btn-small btn-quiet" id="voice-finish">ここでまとめる</button>
+    <button type="button" class="btn btn-primary" id="voice-apply">選んだタグを追加</button>
+  </div>
+</dialog>
+
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<script src="config.js?v=1.0.0"></script>
-<script src="app.js?v=1.0.0"></script>
+<script src="config.js?v=1.1.0"></script>
+<script src="app.js?v=1.1.0"></script>
 </body>
 </html>
